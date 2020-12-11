@@ -282,11 +282,19 @@ process trimming {
 
     if(params.singleEnd){
     """
-    fastp --in1 ${reads[0]} --out1 "${name}.SE.R1.trimmed.fq" ${adapterOptionsSE} ${trimOptions} --thread ${task.cpus} -w ${task.cpus} --html "${name}"_SE_fastp.html --json "${name}"_SE_fastp.json
+    fastp --in1 ${reads[0]} --out1 "${name}.SE.R1.trimmed.fq" \\
+        ${adapterOptionsSE} ${trimOptions} --thread ${task.cpus} \\
+        -w ${task.cpus} --html "${name}"_SE_fastp.html \\
+        --json "${name}"_SE_fastp.json
     """
     } else {
     """
-    fastp --in1 ${reads[0]} --in2 ${reads[1]} --out1 "${name}.PE.R1.trimmed.fq"  --out2 "${name}.PE.R2.trimmed.fq" --unpaired1 "${name}.unpR1.trimmed.fq" --unpaired2 "${name}.unpR2.trimmed.fq" ${adapterOptionsPE}  ${trimOptions} --thread ${task.cpus} -w ${task.cpus}  --html "${name}"_PE_fastp.html --json "${name}"_PE_fastp.json
+    fastp --in1 ${reads[0]} --in2 ${reads[1]} \\
+        --out1 "${name}.PE.R1.trimmed.fq"  --out2 "${name}.PE.R2.trimmed.fq" \\
+        --unpaired1 "${name}.unpR1.trimmed.fq" --unpaired2 "${name}.unpR2.trimmed.fq" \\
+        ${adapterOptionsPE}  ${trimOptions} --thread ${task.cpus} \\
+        -w ${task.cpus}  --html "${name}"_PE_fastp.html \\
+        --json "${name}"_PE_fastp.json
     """
     }
 }
@@ -323,7 +331,11 @@ process trimming_orphans {
     ${params.reverse_adapter}
     ADAPTERS
     
-    fastp --in1 ${reads[0]} --out1 "${name}.orphans.trimmed.fq" ${adapterOptions} ${trimOptions} --thread ${task.cpus} -w ${task.cpus} --html "${name}"_orphans_fastp.html --json "${name}"_orphans_fastp.json
+    fastp --in1 ${reads[0]} --out1 "${name}.orphans.trimmed.fq" \\
+        ${adapterOptions} ${trimOptions} --thread ${task.cpus} \\
+        -w ${task.cpus} \\
+        --html "${name}"_orphans_fastp.html \\
+        --json "${name}"_orphans_fastp.json
     """
 }
 
