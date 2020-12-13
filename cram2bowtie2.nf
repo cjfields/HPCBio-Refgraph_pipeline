@@ -7,24 +7,9 @@ params.samplePath            = false          /*input folder, must specify compl
 params.outputDir             = false          /*output folder, must specify complete path. Required parameters*/
 params.singleEnd             = false          /*options: true|false. true = the input type is single end reads; false = the input type is paired reads. Default is false*/
 
-/* parameters for readprep = qctrimming and adapter removal */
-// params.skipTrim              = false           /*qc-trimming of reads. options: true|false. Default is false*/     
-// params.min_read_length       = '20'            /*minimum length of read to be kept after trimming for downstream analysis. Default is 20*/
-// params.min_base_quality      = '20'            /*minimum base quality. Default is 20*/
-// params.guess_adapter         = true            /*auto-detect adapter from input file. options: true|false. Default is true*/
-// params.forward_adapter       = false           /*adapter sequence to be clipped off (forward). */
-// params.reverse_adapter       = false           /*adapter sequence to be clipped off (reverse). Used for paired reads only*.*/
-
-
 /*output folder paths*/
 readPrepPath                 = "${params.outputDir}/read_prep"
 alnPath                      = "${params.outputDir}/alns"
-// trimPath                     = "${params.outputDir}/trimmed"
-// megahitPath                  = "${params.outputDir}/megahit"
-// masurcaPath                  = "${params.outputDir}/masurca"
-// kraken2Path                  = "${params.outputDir}/kraken2"
-// multiqcPath                  = "${params.outputDir}/multiqc"
-// metricsPath                  = "${params.outputDir}/assembly_metrics"
 
 /*cluster parameters */
 myExecutor                   = 'slurm'
@@ -33,16 +18,10 @@ defaultCPU                   = '1'
 defaultMemory                = '20'
 assemblerCPU                 = '12'
 assemblerMemory              = '100'
-// params.clusterAcct           = " -A h3bionet "
 
 /*software stack*/
 params.bowtieMod             = 'Bowtie2/2.4.2-IGB-gcc-8.2.0'
-// params.perlMod               = 'Perl/5.24.1-IGB-gcc-4.9.4'
-// params.fastpMod              = 'fastp/0.20.0-IGB-gcc-4.9.4'
 params.samtoolsMod           = 'SAMtools/1.10-IGB-gcc-8.2.0'
-// params.megahitMod            = 'MEGAHIT/1.2.9-IGB-gcc-8.2.0'
-// params.assemblathon          = "/home/groups/hpcbio/apps/FAlite/assemblathon_stats.pl"
-// params.multiqcMod            = "MultiQC/1.7-IGB-gcc-4.9.4-Python-3.6.1"
 
 /*Prepare input*/
 orig_genome_file                  = file(params.originalGenome)
@@ -51,15 +30,15 @@ new_genome_file                  = file(params.newGenome)
 new_genomeStore                  = new_genome_file.getParent()
 
 // if( !genome_file.exists() ) exit 1, "Missing reference genome file: ${genome_file}"
-// CRAM_Ch1 = Channel.fromFilePairs("${params.samplePath}", size: 1)
+CRAM_Ch1 = Channel.fromFilePairs("${params.samplePath}", size: 1)
 
 // TEMP Workaround to test bowtie2 step, uncomment above and below processes when fixed
-fq_pe_ch = Channel.fromFilePairs("${params.samplePath}")
+// fq_pe_ch = Channel.fromFilePairs("${params.samplePath}")
 
 /*
 
   prepare_genome 
-  This process is executed only once
+  This process is executed only once. This is the original reference genome from the CRAM file
 
 */
 
@@ -87,6 +66,14 @@ process prepare_genome{
     """
 }
 
+/*
+
+  prepare_new_genome 
+  This process is executed only once; this is the genome to be mapped to
+
+*/
+
+
 process prepare_new_genome{
     tag                    { genome }
     executor               myExecutor
@@ -109,6 +96,13 @@ process prepare_new_genome{
     samtools faidx ${genome}
     """
 }
+
+/*
+
+  prepare_bowtie2 
+  This process is executed only once.  Generate new bowtie2 index if needed
+
+*/
 
 
 process prepare_bowtie2 {
@@ -143,35 +137,35 @@ process prepare_bowtie2 {
 */
 
 
-// process qc_input {
-//     tag                    { name }
-//     executor               myExecutor
-//     clusterOptions         params.clusterAcct 
-//     cpus                   defaultCPU
-//     queue                  params.myQueue
-//     memory                 "$defaultMemory GB"
-//     module                 params.samtoolsMod
-//     // publishDir             readPrepPath, mode: "copy"	    
-//     validExitStatus        0,1
-//     errorStrategy          'ignore'
-//     stageOutMode           'copy'
-//     
-//     input:
-//     set val(name), file(CRAM) from CRAM_Ch1	
-// 
-//     output:
-//     set val(name), file('*_ok.cram') optional true into extract_ch
-//     
-//     script:
-//     """
-//     samtools quickcheck ${CRAM}
-//     if [ \$? -eq 0 ]
-//     then
-//         cp ${CRAM} ${name}_ok.cram
-//     fi
-//     """
-// 
-// }
+process qc_input {
+    tag                    { name }
+    executor               myExecutor
+    clusterOptions         params.clusterAcct 
+    cpus                   defaultCPU
+    queue                  params.myQueue
+    memory                 "$defaultMemory GB"
+    module                 params.samtoolsMod
+    // publishDir             readPrepPath, mode: "copy"	    
+    validExitStatus        0,1
+    errorStrategy          'ignore'
+    stageOutMode           'copy'
+    
+    input:
+    set val(name), file(CRAM) from CRAM_Ch1	
+
+    output:
+    set val(name), file('*_ok.cram') optional true into extract_ch
+    
+    script:
+    """
+    samtools quickcheck ${CRAM}
+    if [ \$? -eq 0 ]
+    then
+        cp ${CRAM} ${name}_ok.cram
+    fi
+    """
+
+}
 
 
 /*
@@ -180,34 +174,41 @@ process prepare_bowtie2 {
 
 */
 
-// process extract_fastq {
-//     tag                    { name }
-//     executor               myExecutor
-//     cpus                   4
-//     queue                  params.myQueue
-//     memory                 "$defaultMemory GB"
-//     module                 params.samtoolsMod
-//     publishDir             readPrepPath, mode: "copy"
-//     
-//     input:
-//     set val(id), file(cram) from extract_ch	
-//     file genome from orig_genome_file
-//     file index from orig_genome_index_ch
-// 
-//     output:
-//     set val(id), file("*.R{1,2}.fastq.gz") optional true into fq_pe_ch
-//     
-//     script:    
-//     """
-//     samtools collate -@ ${task.cpus} -f --reference ${genome} -o tmp.bam ${cram}
-//     
-//     samtools fastq -@ ${task.cpus} \\
-//         -1 ${id}.R1.fastq.gz -2 ${id}.R2.fastq.gz tmp.bam
-//         
-//     rm tmp.bam
-//     """
-// 
-// }
+process extract_fastq {
+    tag                    { name }
+    executor               myExecutor
+    cpus                   4
+    queue                  params.myQueue
+    memory                 "$defaultMemory GB"
+    module                 params.samtoolsMod
+    publishDir             readPrepPath, mode: "copy"
+    scratch                "/scratch"    
+    
+    input:
+    set val(id), file(cram) from extract_ch	
+    file genome from orig_genome_file
+    file index from orig_genome_index_ch
+
+    output:
+    set val(id), file("*.R{1,2}.fastq.gz") optional true into fq_pe_ch
+    
+    script:    
+    """
+    samtools collate -@ ${task.cpus} -f --reference ${genome} -o tmp.bam ${cram}
+    
+    samtools fastq -@ ${task.cpus} \\
+        -1 ${id}.R1.fastq.gz -2 ${id}.R2.fastq.gz tmp.bam
+        
+    rm tmp.bam
+    """
+
+}
+
+/*
+
+   bowtie2 alignment
+
+*/
 
 process bowtie2_aln {
     tag                    { name }
@@ -218,7 +219,7 @@ process bowtie2_aln {
     memory                 "$defaultMemory GB"
     module                 params.samtoolsMod,params.bowtieMod
     publishDir             alnPath, mode: "copy"// 
-//     scratch                "/scratch"
+    scratch                "/scratch"
     
     input:
     set val(id), file(alnReads) from fq_pe_ch
@@ -238,6 +239,13 @@ process bowtie2_aln {
 
 }
 
+/*
+
+   BAM to CRAM
+
+*/
+
+
 process samtools_cram {
     tag                    { name }
     executor               myExecutor
@@ -247,7 +255,7 @@ process samtools_cram {
     memory                 "$defaultMemory GB"
     module                 params.samtoolsMod
     publishDir             alnPath, mode: "copy"// 
-//     scratch                "/scratch"
+    scratch                "/scratch"
     
     input:
     set val(id), file(bam) from bam_ch
