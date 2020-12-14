@@ -5,7 +5,7 @@ params.genome                = false          /*genome fasta file, must specify 
 params.samplePath            = false          /*input folder, must specify complete path. Required parameters*/
 params.outputDir             = false          /*output folder, must specify complete path. Required parameters*/
 params.singleEnd             = false          /*options: true|false. true = the input type is single end reads; false = the input type is paired reads. Default is false*/
-params.assembler             = 'megahit'      /*options: megahit|masurca. Default is megahit*/
+params.assembler             = 'megahit'      /*options: megahit|masurca|sga. Default is megahit*/
 params.skipKraken2           = true           /*options: true|false. Default is true which means that kraken2 will be skipped*/
 
 /* parameters for readprep = qctrimming and adapter removal */
@@ -355,57 +355,167 @@ process trimming_orphans {
 // TODO: at the moment SE CRAM assembly is **not** supported, we will need an if/else
 // to handle this one
 
-process megahit_assemble {
-    tag                    { name }
-    executor               myExecutor
-    clusterOptions         params.clusterAcct 
-    cpus                   assemblerCPU
-    queue                  params.myQueue
-    memory                 "$assemblerMemory GB"
-    module                 params.megahitMod 
-    publishDir             megahitPath , mode:'copy'
-    validExitStatus        0,1
-    errorStrategy          'finish'
-    scratch                '/scratch'
-    stageOutMode           'copy'
+if (params.assembler = "megahit") {
+
+    process megahit_assemble {
+        tag                    { name }
+        executor               myExecutor
+        clusterOptions         params.clusterAcct 
+        cpus                   assemblerCPU
+        queue                  params.myQueue
+        memory                 "$assemblerMemory GB"
+        module                 params.megahitMod 
+        publishDir             megahitPath , mode:'copy'
+        validExitStatus        0,1
+        errorStrategy          'finish'
+        scratch                '/scratch'
+        stageOutMode           'copy'
     
-    // TODO: We need to sanity check that the channels are matched by the initial value (name)
-    // See the join command: https://www.nextflow.io/docs/latest/operator.html?highlight=map#join
-    input:
-    set val(name), file(pefastqs), file(sefastqs) from trim_pe_ch
-    set val(name2), file(orphans) from trim_orphan_ch
+        // TODO: We need to sanity check that the channels are matched by the initial value (name)
+        // See the join command: https://www.nextflow.io/docs/latest/operator.html?highlight=map#join
+        input:
+        set val(name), file(pefastqs), file(sefastqs) from trim_pe_ch
+        set val(name2), file(orphans) from trim_orphan_ch
 
-    output:
-    set val(name), file('*.stats') optional true into metrics_ch
-    file '*'
+        output:
+        set val(name), file('*.stats') optional true into metrics_ch
+        file '*'
 
-    script:
-    if(params.singleEnd){
-    """
-    megahit -1 ${fastqs[0]} -o ${name}.megahit_results
+        script:
+        if(params.singleEnd){
+        """
+        megahit -1 ${fastqs[0]} -o ${name}.megahit_results
     
-    perl $params.assemblathon ${name}.megahit_results/final.contigs.fa > ${name}.megahit_results/final.contigs.fa.stats
-    """
-    } else {
-    """
-    megahit -1 ${pefastqs[0]} -2 ${pefastqs[1]} \\
-        -r ${sefastqs[0]},${sefastqs[1]},${orphans} \\
-        -o ${name}.megahit_results
+        perl $params.assemblathon ${name}.megahit_results/final.contigs.fa > ${name}.megahit_results/final.contigs.fa.stats
+        """
+        } else {
+        """
+        megahit -1 ${pefastqs[0]} -2 ${pefastqs[1]} \\
+            -r ${sefastqs[0]},${sefastqs[1]},${orphans} \\
+            -o ${name}.megahit_results
 
-    # megahit -1 ${pefastqs[0]} -2 ${pefastqs[1]}  -o ${name}.megahit_results
+        # megahit -1 ${pefastqs[0]} -2 ${pefastqs[1]}  -o ${name}.megahit_results
 
-    perl $params.assemblathon ${name}.megahit_results/final.contigs.fa > ${name}.final.contigs.fa.stats
+        perl $params.assemblathon ${name}.megahit_results/final.contigs.fa > ${name}.final.contigs.fa.stats
 
-    """
+        """
+        }
     }
+} else if (params.assembler = "sga") {
+
+    process sga_assemble {
+        tag                    { name }
+        executor               myExecutor
+        clusterOptions         params.clusterAcct 
+        cpus                   assemblerCPU
+        queue                  params.myQueue
+        memory                 "$assemblerMemory GB"
+        module                 "singularity/3.4.1" 
+        container              "file:///home/a-m/hpcinstru04/h3a/containers/sga_v0.10.15-4-deb_cv1.sif"
+        publishDir             'sga' , mode:'copy'
+//         validExitStatus        0,1
+//         errorStrategy          'finish'
+//         scratch                '/scratch'
+//         stageOutMode           'copy'
+    
+        // TODO: We need to sanity check that the channels are matched by the initial value (name)
+        // See the join command: https://www.nextflow.io/docs/latest/operator.html?highlight=map#join
+        input:
+        set val(name), file(pefastqs), file(sefastqs) from trim_pe_ch
+        set val(name2), file(orphans) from trim_orphan_ch
+
+        output:
+        set val(name), file('*.stats') optional true into metrics_ch
+        file '*'
+
+        script:
+        // if(params.singleEnd){
+//         """
+//         
+//     
+//         perl $params.assemblathon ${name}.megahit_results/final.contigs.fa > ${name}.megahit_results/final.contigs.fa.stats
+//         """
+//         } else {
+        """
+        # See this link: https://github.com/SJTU-CGM/HUPAN/blob/bafdfbc94840736450af651ed6ea48f3cea03432/lib/HUPANassemSLURM.pm#L401
+        #################################################################################
+        # Preprocess and index PE reads
+        #################################################################################
+
+        sga preprocess -o tmp.pe.fq --pe-mode 1 ${pefastqs[0]} ${pefastqs[0]}
+        sga index -a ropebwt --no-reverse -t ${task.cpus} tmp.pe.fq
+    
+        #################################################################################
+        # Preprocess SE and orphans, merge them 
+        #################################################################################
+        
+        sga preprocess -o tmp.se1.fq --pe-mode 0 ${sefastqs[0]} 
+        sga preprocess -o tmp.se2.fq --pe-mode 0 ${sefastqs[1]} 
+        sga preprocess -o tmp.orphans.fq --pe-mode 0 ${sefastqs[1]} 
+
+        #################################################################################
+        # Merge them 
+        #################################################################################
+        
+        sga merge -p ?????? tmp.pe.fq tmp.se.fq tmp.orphans.fq --pe-mode 0        
+        sga correct -k 55 --learn -t ${task.cpus} -o corrected.fastq $preprocess_fastq
+        
+        #################################################################################
+        # Post-correction cleanup: 
+        # https://github.com/SJTU-CGM/HUPAN/blob/bafdfbc94840736450af651ed6ea48f3cea03432/lib/HUPANassemSLURM.pm#L562
+        #################################################################################
+        
+        sga index -a ropebwt -t ${task.cpus} corrected.fastq
+        sga filter -x 2 -o filtered.fasta -t ${task.cpus} corrected.fastq
+
+        #################################################################################
+        # Post-filter cleanup: 
+        # https://github.com/SJTU-CGM/HUPAN/blob/bafdfbc94840736450af651ed6ea48f3cea03432/lib/HUPANassemSLURM.pm#L569
+        #################################################################################
+
+        #################################################################################
+        # Pre-assembly and assembly steps
+        # NOTE: next blocks assumes 30x depth, see this line: 
+        # https://github.com/SJTU-CGM/HUPAN/blob/bafdfbc94840736450af651ed6ea48f3cea03432/lib/HUPANassemSLURM.pm#L576
+        # We may want to make this configurable!
+        #################################################################################
+        
+        sga fm-merge -m 65 -t ${task.cpus} -o merged.fasta filtered.fasta
+        
+        #################################################################################        
+        # Post-merge cleanup: https://github.com/SJTU-CGM/HUPAN/blob/bafdfbc94840736450af651ed6ea48f3cea03432/lib/HUPANassemSLURM.pm#L618
+        #################################################################################
+        
+        sga index -d 20000000 -t ${task.cpus} merged.fasta
+        sga rmdup -t ${task.cpus} -o rmdup.fasta merged.fasta
+
+        #################################################################################        
+        # Post-duplicate removal cleanup: https://github.com/SJTU-CGM/HUPAN/blob/bafdfbc94840736450af651ed6ea48f3cea03432/lib/HUPANassemSLURM.pm#L588
+        #################################################################################
+                
+        sga overlap -m 65 -t ${task.cpus} rmdup.fasta
+
+        #################################################################################
+        # Post overlap cleanup: 
+        # https://github.com/SJTU-CGM/HUPAN/blob/bafdfbc94840736450af651ed6ea48f3cea03432/lib/HUPANassemSLURM.pm#L607
+        #################################################################################
+
+        sga assemble -m 91 -l 160 -o assembly correct.filter.pass.merged.rmdup.asqg.gz    
+        
+        # perl $params.assemblathon ${name}.megahit_results/final.contigs.fa > ${name}.final.contigs.fa.stats
+        """
+    }
+} else if (params.assembler == "masurca") {
+    /*
+
+      masurca
+      To be added later
+
+    */
+    exit 1, "MASURCA not added yet!"
+} else {
+    exit 1, "Unsupported assembler: ${params.assembler}"
 }
-
-/*
-
-  masurca
-  To be added later
-
-*/
 
 /*
 
