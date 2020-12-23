@@ -355,7 +355,7 @@ process trimming_orphans {
 // TODO: at the moment SE CRAM assembly is **not** supported, we will need an if/else
 // to handle this one
 
-if (params.assembler = "megahit") {
+if (params.assembler == "megahit") {
 
     process megahit_assemble {
         tag                    { name }
@@ -374,8 +374,7 @@ if (params.assembler = "megahit") {
         // TODO: We need to sanity check that the channels are matched by the initial value (name)
         // See the join command: https://www.nextflow.io/docs/latest/operator.html?highlight=map#join
         input:
-        set val(name), file(pefastqs), file(sefastqs) from trim_pe_ch
-        set val(name2), file(orphans) from trim_orphan_ch
+        set val(name), file(pefastqs), file(sefastqs), file(orphans) from trim_pe_ch.join(trim_orphan_ch)
 
         output:
         set val(name), file('*.stats') optional true into metrics_ch
@@ -401,9 +400,9 @@ if (params.assembler = "megahit") {
         """
         }
     }
-} else if (params.assembler = "sga") {
+} else if (params.assembler == "sga") {
 
-    process sga_assemble {
+    process sga_contigs {
         tag                    { name }
         executor               myExecutor
         clusterOptions         params.clusterAcct 
@@ -412,7 +411,7 @@ if (params.assembler = "megahit") {
         memory                 "$assemblerMemory GB"
         module                 "singularity/3.4.1" 
         container              "file:///home/a-m/hpcinstru04/h3a/containers/sga_v0.10.15-4-deb_cv1.sif"
-        publishDir             'sga' , mode:'copy'
+        publishDir             'sga'
 //         validExitStatus        0,1
 //         errorStrategy          'finish'
 //         scratch                '/scratch'
@@ -421,11 +420,10 @@ if (params.assembler = "megahit") {
         // TODO: We need to sanity check that the channels are matched by the initial value (name)
         // See the join command: https://www.nextflow.io/docs/latest/operator.html?highlight=map#join
         input:
-        set val(name), file(pefastqs), file(sefastqs) from trim_pe_ch
-        set val(name2), file(orphans) from trim_orphan_ch
+        set val(name), file(pefastqs), file(sefastqs), file(orphans) from trim_pe_ch.join(trim_orphan_ch)
 
         output:
-        set val(name), file('*.stats') optional true into metrics_ch
+        set val(name), file('*assembly-contigs.fa') optional true into metrics_ch
         file '*'
 
         script:
@@ -443,22 +441,37 @@ if (params.assembler = "megahit") {
         #################################################################################
 
         sga preprocess -o tmp.pe.fq --pe-mode 1 ${pefastqs[0]} ${pefastqs[0]}
-        sga index -a ropebwt --no-reverse -t ${task.cpus} tmp.pe.fq
+        # sga index -a ropebwt --no-reverse -t ${task.cpus} tmp.pe.fq
     
         #################################################################################
         # Preprocess SE and orphans, merge them 
         #################################################################################
         
         sga preprocess -o tmp.se1.fq --pe-mode 0 ${sefastqs[0]} 
+        # sga index -a ropebwt --no-reverse -t ${task.cpus} tmp.se1.fq
         sga preprocess -o tmp.se2.fq --pe-mode 0 ${sefastqs[1]} 
+        # sga index -a ropebwt --no-reverse -t ${task.cpus} tmp.se2.fq
         sga preprocess -o tmp.orphans.fq --pe-mode 0 ${sefastqs[1]} 
+        # sga index -a ropebwt --no-reverse -t ${task.cpus} tmp.orphans.fq
+        
+        cat tmp.pe.fq tmp.se1.fq tmp.se2.fq tmp.orphans.fq > tmp.all.fq
+        sga index -a ropebwt --no-reverse -t ${task.cpus} tmp.all.fq
 
         #################################################################################
-        # Merge them 
+        # Merge them  (not done here)
         #################################################################################
+
         
-        sga merge -p ?????? tmp.pe.fq tmp.se.fq tmp.orphans.fq --pe-mode 0        
-        sga correct -k 55 --learn -t ${task.cpus} -o corrected.fastq $preprocess_fastq
+        #sga-mergeDriver -t ${task.cpus} tmp.pe.fq tmp.se1.fq tmp.se2.fq tmp.orphans.fq        
+        #sga merge -t ${task.cpus} -p ${name}.merged tmp.pe.fq tmp.se1.fq 
+        #sga merge -t ${task.cpus} -p ${name}.merged ${name}.merged.fastq tmp.se2.fq         
+        #sga merge -t ${task.cpus} -p ${name}.merged ${name}.merged.fastq tmp.orphans.fq 
+
+        #################################################################################
+        # Correct them 
+        #################################################################################
+
+        sga correct -k 55 --learn -t ${task.cpus} -o corrected.fastq tmp.all.fastq
         
         #################################################################################
         # Post-correction cleanup: 
@@ -487,24 +500,63 @@ if (params.assembler = "megahit") {
         #################################################################################
         
         sga index -d 20000000 -t ${task.cpus} merged.fasta
-        sga rmdup -t ${task.cpus} -o rmdup.fasta merged.fasta
+        sga rmdup -t ${task.cpus} merged.fasta
 
         #################################################################################        
         # Post-duplicate removal cleanup: https://github.com/SJTU-CGM/HUPAN/blob/bafdfbc94840736450af651ed6ea48f3cea03432/lib/HUPANassemSLURM.pm#L588
         #################################################################################
                 
-        sga overlap -m 65 -t ${task.cpus} rmdup.fasta
+        sga overlap -m 65 -t ${task.cpus} rmdup.fa
 
         #################################################################################
         # Post overlap cleanup: 
         # https://github.com/SJTU-CGM/HUPAN/blob/bafdfbc94840736450af651ed6ea48f3cea03432/lib/HUPANassemSLURM.pm#L607
         #################################################################################
 
-        sga assemble -m 91 -l 160 -o assembly correct.filter.pass.merged.rmdup.asqg.gz    
+        sga assemble -m 91 -l 160 -o assembly rmdup.asqg.gz    
         
         # perl $params.assemblathon ${name}.megahit_results/final.contigs.fa > ${name}.final.contigs.fa.stats
         """
     }
+    
+    
+    process bwa_aln {
+        tag                    { name }
+        executor               myExecutor
+        clusterOptions         params.clusterAcct 
+        cpus                   assemblerCPU
+        queue                  params.myQueue
+        memory                 "$assemblerMemory GB"
+        module                 "BWA/0.7.17-IGB-gcc-8.2.0",samtoolsMod
+        publishDir             'sga'
+//         validExitStatus        0,1
+//         errorStrategy          'finish'
+//         scratch                '/scratch'
+//         stageOutMode           'copy'
+    
+        // TODO: We need to sanity check that the channels are matched by the initial value (name)
+        // See the join command: https://www.nextflow.io/docs/latest/operator.html?highlight=map#join
+        input:
+        set val(name), file(pefastqs), file(sefastqs), file(orphans) from trim_pe_ch.join(trim_orphan_ch)
+
+        output:
+        set val(name), file('*.stats') optional true into metrics_ch
+        file '*'
+
+        script:
+        // if(params.singleEnd){
+//         """
+//         
+//     
+//         perl $params.assemblathon ${name}.megahit_results/final.contigs.fa > ${name}.megahit_results/final.contigs.fa.stats
+//         """
+//         } else {
+        """
+        bwa index ${assembly}
+        
+        """"
+        }
+        
 } else if (params.assembler == "masurca") {
     /*
 
